@@ -13,13 +13,17 @@ RUN wget https://github.com/SagerNet/sing-box/releases/download/v1.13.13/sing-bo
 
 COPY config.json .
 
+# 创建简单的健康响应文件
+RUN echo "OK" > /www/index.html
+
 EXPOSE 8080
 
-# 在后台启动一个简单的 HTTP 服务返回 OK（监听 8081）
-RUN mkdir -p /www && echo "OK" > /www/index.html
-
-# 使用 socat 将 8080 的流量转发：若是 HTTP GET 则返回 /www/index.html，否则转发到 8081（VLESS）
-# 这里使用 socat 的 OPENSSL 或 TCP 转发，但判断逻辑复杂
-
-# 我们改用两个独立服务：HTTP 服务在 8081，sing-box 在 8080，但外部只能访问一个端口。
-# 因此必须让 sing-box 能处理 HTTP，但 fallback 不工作。
+# 启动 socat，监听 8080，对 HTTP 请求返回 OK，其他流量转发到 8081（VLESS）
+# 注意：这里假设 VLESS 监听 8081，且 socat 会将非 HTTP 的连接原样转发。
+CMD sh -c 'socat TCP-LISTEN:8080,fork,reuseaddr SYSTEM:"\
+  read -r line; \
+  if echo \"\$line\" | grep -q \"^GET /health\"; then \
+    echo -e \"HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\nOK\"; \
+  else \
+    exec socat - TCP:127.0.0.1:8081; \
+  fi" & ./sing-box run -c config.json'
